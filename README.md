@@ -1,633 +1,339 @@
-# SIM Provisioning Suite
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/corelabs-aperture-bone.svg">
+    <img src="docs/corelabs-aperture-ink.svg" alt="corelabs-oss" width="96">
+  </picture>
+</p>
 
-A Python-based **GSM / USIM / SIM personalization data generation system** with both a desktop GUI and a command-line workflow.
+<h1 align="center">pysim-perso</h1>
 
-The project generates structured SIM personalization batches containing subscriber identifiers, authentication material, administrative credentials, and OTA keysets. It also provides automatic ICCID/IMSI sequencing, issuance protection, batch history, verification utilities, and formatted Microsoft Excel exports.
+<p align="center">
+  <a href="https://github.com/corelabs-oss/pysim-perso/actions/workflows/ci.yml"><img src="https://github.com/corelabs-oss/pysim-perso/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/pysim-perso/"><img src="https://img.shields.io/pypi/v/pysim-perso" alt="PyPI"></a>
+  <a href="https://pypi.org/project/pysim-perso/"><img src="https://img.shields.io/pypi/pyversions/pysim-perso" alt="Python versions"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"></a>
+</p>
 
-> **Security notice:** This project can generate cryptographic SIM key material. Treat configuration files and generated outputs as sensitive data. Do not commit production `settings.json` files or real operator keys to public repositories.
+pysim-perso produces the per-card material a SIM personalization run requires —
+identifiers, authentication keys and administrative codes — from a single
+declarative configuration, and emits it in the formats consumed by
+personalization equipment, laser marking systems and network provisioning.
 
----
-
-## Features
-
-- Desktop **Tkinter GUI** for SIM batch generation
-- Command-line batch generation with `run_batch.py`
-- Automatic **ICCID and IMSI range calculation**
-- Automatic suggestion of the next unused ICCID/IMSI range
-- Unique batch IDs in the format `BATCH-YYYYMMDD-####`
-- Issuance ledger protection against accidental identifier reuse
-- Configurable batch size and output file name
-- Configurable PIN1, PIN2, PUK1, and PUK2 values
-- SIM authentication and OTA key generation
-- OPc, EKI, and ACC derivation
-- Microsoft Excel `.xlsx` export
-- Professionally formatted `SIM_DATA` and `BATCH_INFO` worksheets
-- Batch history tracking
-- End-to-end verification script
-- Standards-oriented GSM/USIM encoding and personalization workflow
-
----
-
-## What the System Generates
-
-A generated SIM record may contain the following data:
-
-| Category | Fields |
-|---|---|
-| Subscriber identifiers | `ICCID`, `IMSI` |
-| Authentication | `KI`, `OPC`, `EKI`, `ACC` |
-| Cardholder credentials | `PIN1`, `PIN2`, `PUK1`, `PUK2` |
-| Administrative data | `ADM1`, `ADM6` |
-| OTA keysets | `KIC1-3`, `KID1-3`, `KIK1-3` |
-| Operator parameters | `OP`, `K4` |
-
-The core generator can produce `ELECT`, `SERVER`, and `GRAPH` datasets depending on the configuration.
-
----
-
-## Standards Referenced
-
-The underlying GSM data-generation library follows or references:
-
-| Area | Standard |
-|---|---|
-| OPc derivation / MILENAGE | 3GPP TS 35.206 |
-| IMSI, ICCID and ACC EF encoding | 3GPP TS 31.102 |
-| Access control classes | 3GPP TS 22.011 |
-| ICCID numbering / Luhn check digit | ITU-T E.118 |
-| OTA keysets | ETSI TS 102 225 |
-
-The verification utility includes a deterministic OPc test vector based on **3GPP TS 35.206**.
-
----
-
-## Requirements
-
-- **Python 3.10 or newer**
-- Windows is recommended for the current GUI because it uses `os.startfile()` to open generated files and folders.
-- `pip`
-
-Major runtime dependencies include:
-
-- `pandas`
-- `openpyxl`
-- `pydantic`
-- `pycryptodome`
-- `numpy`
-- `python-dateutil`
-- `pytz`
-
-The package dependencies are installed through the project setup configuration.
-
----
+It is intended for SIM manufacturers, MVNOs and test-lab engineers who need
+reproducible, standards-conformant batches without maintaining bespoke scripts
+per operator.
 
 ## Installation
 
-Clone or download the project and open a terminal in the repository root.
-
-### 1. Create a virtual environment
+Requires Python 3.10 or newer.
 
 ```bash
-python -m venv .venv
+pip install pysim-perso
 ```
 
-Activate it on Windows:
+Runtime dependencies (`pandas`, `pydantic`, `pycryptodome`, `numpy`) are
+resolved automatically.
+
+<details>
+<summary>Installing from source</summary>
 
 ```bash
-.venv\Scripts\activate
-```
-
-On Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-### 2. Install the project
-
-For a normal installation:
-
-```bash
-pip install .
-```
-
-For development:
-
-```bash
+git clone https://github.com/corelabs-oss/pysim-perso.git
+cd pysim-perso
 pip install -e .
 ```
 
-### 3. Create the local configuration
+</details>
 
-Copy the example configuration:
+## Quick start
 
-**Windows**
-
-```bash
-copy settings.example.json settings.json
-```
-
-**Linux/macOS**
+Copy the example configuration and set your operator parameters:
 
 ```bash
 cp settings.example.json settings.json
 ```
 
-Then edit `settings.json` with the required operator and batch parameters.
+At minimum, set `imsi`, `iccid`, `K4`, `op` and `size`.
 
-> `settings.json` is intentionally excluded from version control because it may contain sensitive operator and cryptographic values.
+```python
+import sys
 
----
+from pysim_perso import DataGenerationScript, json_loader
+from pysim_perso.error import ConfigValidationError, IssuanceOverlapError
+
+
+def main() -> int:
+    script = DataGenerationScript(json_loader("settings.json"))
+    script.json_to_global_params()
+
+    try:
+        # Builds pandas frames in memory; nothing is written yet.
+        frames, keys = script.generate_all_data()
+    except ConfigValidationError as exc:
+        print(f"invalid configuration:\n{exc}", file=sys.stderr)
+        return 1
+
+    elect = frames["ELECT"]
+    print(f"{len(elect)} cards, OP {keys['op']}")
+    print(elect[["ICCID", "IMSI", "KI", "OPC"]].head().to_string(index=False))
+
+    try:
+        # The batch counts as issued here, and the ledger is updated.
+        written = script.write_outputs(frames)
+    except IssuanceOverlapError as exc:
+        print(f"refusing to re-issue: {exc}", file=sys.stderr)
+        return 1
+
+    for output_type, path in sorted(written.items()):
+        print(f"{output_type:<7} -> {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+The two `except` clauses cover the failures you will actually hit:
+`ConfigValidationError` when `prod_check` is enabled and a parameter is wrong,
+and `IssuanceOverlapError` when the identifiers in this batch were issued
+before. Both are documented under [Configuration](#configuration) and
+[Issuance ledger](#issuance-ledger).
+
+Each `DataGenerationScript` owns its own state, so independent configurations
+can be generated concurrently in one process. Read a run's parameters through
+`script.params`.
+
+To confirm an installation end to end, including the TS 35.206 test vector:
+
+```bash
+python verify.py
+```
+
+Further runnable examples are in [`examples/`](examples/).
+
+## What it generates
+
+Each generated record describes one SIM card across 23 fields:
+
+| Group | Fields | Derivation |
+|---|---|---|
+| Identifiers | `ICCID`, `IMSI` | Sequenced from a configured starting value |
+| Authentication | `KI` | 128-bit random, from the OS CSPRNG |
+| | `OPC` | `AES_Ki(OP) ⊕ OP` |
+| | `EKI` | `AES_K4(Ki)` — Ki under the transport key |
+| | `ACC` | Access control class bitmask, from the last IMSI digit |
+| Cardholder | `PIN1`, `PIN2`, `PUK1`, `PUK2` | Fixed per batch or random per card |
+| Administrative | `ADM1`, `ADM6` | Fixed per batch or random per card |
+| OTA | `KIC1-3`, `KID1-3`, `KIK1-3` | 128-bit random per card |
+| Operator | `OP`, `K4` | Constant across the batch, from configuration |
+
+### Standards
+
+| Area | Reference |
+|---|---|
+| OPc derivation | 3GPP TS 35.206 (MILENAGE) |
+| `EF_IMSI`, `EF_ICCID`, `EF_ACC` encoding | 3GPP TS 31.102 |
+| Access control classes | 3GPP TS 22.011 |
+| ICCID numbering and check digit | ITU-T E.118 (Luhn) |
+| OTA keysets | ETSI TS 102 225 |
+
+The OPc implementation is verified against the TS 35.206 test vector on every
+CI run.
+
+## Output formats
+
+Three outputs are produced, each enabled independently and written with its own
+column separator:
+
+| Output | Consumer | Encoding | File |
+|---|---|---|---|
+| `ELECT` | Personalization equipment | Fields encoded to their EF representation | `<FILE_NAME>.txt` |
+| `SERVER` | HLR/HSS provisioning | Plain values | `<FILE_NAME>_server.txt` |
+| `GRAPH` | Laser marking | Plain values, clipped to print positions | `<FILE_NAME>_<OUTPUT_FILES_LASER_EXT>.txt` |
+
+`ELECT` applies GSM EF encoding: nibble-swapped ICCID with its Luhn check
+digit, length- and parity-prefixed IMSI, and `0xFF`-padded PIN.
 
 ## Configuration
 
-The configuration file contains three main sections.
-
-### `DISP`
-
-Controls generation parameters such as:
-
-```json
-{
-  "DISP": {
-    "imsi": "<starting IMSI>",
-    "iccid": "<starting ICCID>",
-    "pin1": "1234",
-    "puk1": "12345678",
-    "pin2": "5678",
-    "puk2": "87654321",
-    "size": 10,
-    "prod_check": true,
-    "elect_check": true,
-    "graph_check": true,
-    "server_check": false
-  }
-}
-```
-
-The real configuration also contains operator cryptographic values such as `op` and `K4`. Do not publish real production values.
-
-### `PATHS`
-
-Controls output naming and location:
-
-```json
-{
-  "PATHS": {
-    "FILE_NAME": "my_batch",
-    "OUTPUT_FILES_DIR": "output",
-    "OUTPUT_FILES_LASER_EXT": "laser"
-  }
-}
-```
-
-### `PARAMETERS`
-
-Controls which fields are written to each output and how laser-marking fields are sliced.
-
-Examples include:
-
-- `data_variables`
-- `server_variables`
-- `laser_variables`
-
----
-
-# Running the Application
-
-## Option 1 — Desktop GUI
-
-Start the desktop application with:
-
-```bash
-python gui_app.py
-```
-
-The window opens as:
-
-**SIM Provisioning Suite**
-
-The GUI allows the operator to enter or review:
-
-- Starting ICCID
-- Starting IMSI
-- Number of SIMs
-- Output file name
-- PIN1
-- PUK1
-- PIN2
-- PUK2
-
-The application automatically previews the ending ICCID and IMSI based on the selected batch size.
-
-### GUI Batch Workflow
-
-When a batch is generated, the application:
-
-1. Loads and validates `settings.json`.
-2. Determines the next available ICCID and IMSI.
-3. Validates the entered batch parameters.
-4. Generates a unique batch ID.
-5. Creates the SIM personalization records.
-6. Writes the generated batch through the core issuance-protected pipeline.
-7. Creates a Microsoft Excel workbook.
-8. Formats the workbook for operator use.
-9. Removes the intermediate TXT files created during the GUI workflow.
-10. Saves the batch in local batch history.
-11. Loads the next unused ICCID/IMSI range for the following batch.
-
-Generated GUI filenames follow the pattern:
-
-```text
-<file-name>_BATCH-YYYYMMDD-####.xlsx
-```
-
-Example:
-
-```text
-PAF_LTE_0012_BATCH-20260907-0001.xlsx
-```
-
----
-
-## Excel Output
-
-The GUI produces a formatted Excel workbook.
-
-### `SIM_DATA`
-
-The main generated dataset is stored in the `SIM_DATA` worksheet.
-
-The GUI applies formatting including:
-
-- Styled column headers
-- Frozen header row
-- Auto-filtering
-- Alternating row shading
-- Automatic column widths
-- Text formatting for ICCID, IMSI and cryptographic fields
-- Preserved leading digits/zeros where applicable
-
-### `BATCH_INFO`
-
-A second worksheet named `BATCH_INFO` records operational metadata such as:
-
-- Batch ID
-- Generation date and time
-- Number of SIMs
-- Starting ICCID
-- Ending ICCID
-- Starting IMSI
-- Ending IMSI
-- Export format
-- Issuance protection status
-
-This provides a simple audit/reference sheet alongside the generated personalization data.
-
----
-
-## Automatic Identifier Sequencing
-
-The system automatically calculates the ending range using:
-
-```text
-end = start + quantity - 1
-```
-
-After a successful issuance, the next batch can start from:
-
-```text
-Previous Ending ICCID + 1
-Previous Ending IMSI  + 1
-```
-
-This allows consecutive batches to be produced without manually calculating the next identifier range.
-
----
-
-## Issuance Protection
-
-Issued ranges are tracked through:
-
-```text
-.issuance_ledger.json
-```
-
-inside the configured output directory.
-
-The ledger is used to prevent accidental reuse or overlap of previously issued ICCID ranges.
-
-This is important because regenerating the same identifier range may create the same ICCIDs with different cryptographic keys, resulting in invalid or conflicting personalization data.
-
-Do not manually delete the issuance ledger in a production workflow unless you fully understand the consequences.
-
----
-
-## Batch History
-
-The GUI maintains a local history file:
-
-```text
-.batch_history.json
-```
-
-The history is used for batch tracking and for generating sequential daily batch IDs.
-
-Batch IDs follow:
-
-```text
-BATCH-YYYYMMDD-####
-```
-
-For example:
-
-```text
-BATCH-20260907-0001
-BATCH-20260907-0002
-BATCH-20260907-0003
-```
-
-The sequence restarts for a new date.
-
----
-
-# Command-Line Batch Generation
-
-A command-line workflow is also available:
-
-```bash
-python run_batch.py
-```
-
-The script loads `settings.json` and prompts for:
-
-```text
-Starting ICCID
-Starting IMSI
-Number of SIMs
-Output file name
-PIN1
-PUK1
-PIN2
-PUK2
-```
-
-Press **Enter** at a prompt to keep the displayed default value.
-
-Unlike the GUI workflow, `run_batch.py` keeps the normal generated TXT outputs and additionally creates an Excel workbook.
-
-Example workflow:
-
-```text
-============================================================
-        GSM / SIM DATA GENERATOR - EXCEL EXPORT
-============================================================
-
-Enter batch details.
-Press ENTER to use the value shown in brackets.
-
-Starting ICCID [...]
-Starting IMSI [...]
-Number of SIMs [10]
-Output file name [my_batch]
-PIN1 [...]
-PUK1 [...]
-PIN2 [...]
-PUK2 [...]
-```
-
-After generation, the script displays the generated frames, output TXT paths, and Excel file location.
-
----
-
-# Verification
-
-Run:
-
-```bash
-python verify.py
-```
-
-The verification utility performs four groups of checks:
-
-1. **Package imports**
-2. **Random data generators**
-3. **Cryptographic and encoding operations**
-4. **Full generation pipeline**
-
-Among other checks, it validates:
-
-- Ki generation
-- OTA key generation
-- PIN generation
-- PUK generation
-- OPc calculation
-- EKI calculation
-- ACC calculation
-- XOR behavior
-- PIN encode/decode round trip
-- 3GPP TS 35.206 OPc test vector
-- Configuration parameter validation
-- Generated DataFrames
-
-Use a custom configuration:
-
-```bash
-python verify.py --config path/to/settings.json
-```
-
-Skip the complete pipeline test:
-
-```bash
-python verify.py --no-pipeline
-```
-
-A successful run exits with code `0`; one or more failed checks return code `1`.
-
----
-
-# Output Modes
-
-The underlying generator supports three output types.
-
-| Output | Intended Use |
+A single JSON document with three sections. All fields are validated on load;
+invalid values raise a `ValidationError` naming the offending field rather than
+failing later in the pipeline.
+
+### `DISP` — generation parameters
+
+| Field | Type | Description |
+|---|---|---|
+| `imsi` | 15 digits | Starting IMSI. See [Identifier sequencing](#identifier-sequencing) |
+| `iccid` | 18–19 digits | Starting ICCID, **without** the Luhn check digit — it is computed during encoding |
+| `op` | 32 hex chars | Operator key |
+| `K4` | 32, 48 or 64 hex chars | Transport key. Length selects the AES variant: 128, 192 or 256 |
+| `size` | 1–1,000,000 | Number of cards in the batch |
+| `pin1`, `pin2` | 4 digits | PIN value, used when the corresponding `*_fix` flag is set |
+| `puk1`, `puk2` | 8 digits | PUK value, same convention |
+| `adm1`, `adm6` | 8 printable ASCII | Administrative codes, same convention |
+| `pin1_fix`, `puk1_fix`, `adm1_fix`, … | bool | `true` applies the configured value to every card; `false` generates a unique random value per card |
+| `elect_check`, `graph_check`, `server_check` | bool | Enable each output |
+| `elect_data_sep`, `server_data_sep`, `graph_data_sep` | string | Column separator per output |
+| `prod_check` | bool | Validate every parameter before generating. Raises `ConfigValidationError` listing all failures |
+
+### `PATHS` — output locations
+
+| Field | Description |
 |---|---|
-| `ELECT` | SIM personalization / electrical personalization equipment |
-| `SERVER` | HLR/HSS or provisioning-side data |
-| `GRAPH` | Laser marking / printed SIM information |
+| `FILE_NAME` | Base name for output files, without extension |
+| `OUTPUT_FILES_DIR` | Destination directory, created if absent. Also holds the issuance ledger |
+| `OUTPUT_FILES_LASER_EXT` | Suffix distinguishing the laser output file |
 
-These outputs can be individually enabled or disabled in `settings.json`.
+### `PARAMETERS` — column selection
 
-The desktop GUI converts generated data into its formatted Excel workflow and removes the intermediate TXT files after successful Excel creation. The CLI batch script retains the standard TXT outputs and adds an Excel export.
+| Field | Description |
+|---|---|
+| `data_variables` | Ordered columns for `ELECT` |
+| `server_variables` | Ordered columns for `SERVER` |
+| `laser_variables` | Print position → `[column, type, "start-end"]` for `GRAPH` |
 
----
+Valid column names, case-sensitive:
 
-# Project Structure
-
-A typical repository layout is:
-
-```text
-.
-├── gsm_data_generator/        # Core GSM/SIM generation library
-├── gui_app.py                 # Desktop SIM Provisioning Suite
-├── run_batch.py               # Interactive CLI + Excel export
-├── verify.py                  # End-to-end verification utility
-├── settings.example.json      # Safe configuration template
-├── settings.json              # Local configuration (do not commit)
-├── gen_requirements.py        # Dependency/requirements generator
-├── setup.py                   # Package configuration
-├── pyproject.toml             # Python build-system configuration
-├── MANIFEST.in                # Source distribution manifest
-├── mypy.ini                   # Static type-checking configuration
-├── LICENSE                    # Apache License 2.0
-└── README.md
+```
+ICCID  IMSI  OP    K4    PIN1  PUK1  PIN2  PUK2  KI    EKI   OPC   ADM1
+ADM6   ACC   KIC1  KID1  KIK1  KIC2  KID2  KIK2  KIC3  KID3  KIK3
 ```
 
-Generated output directories may also contain:
+`laser_variables` maps a print position to a slice of a field, so one column may
+appear at several positions:
 
-```text
-.issuance_ledger.json
-.batch_history.json
-*.xlsx
-*.txt
+```json
+"laser_variables": {
+  "0": ["ICCID", "Normal", "0-3"],
+  "1": ["ICCID", "Normal", "4-7"],
+  "2": ["PIN1",  "Normal", "0-3"]
+}
 ```
 
-depending on the workflow being used.
+Keys are non-negative integers applied in ascending numeric order, independent
+of their order in the file. Ranges are inclusive and must satisfy
+`start <= end`.
 
----
+## Identifier sequencing
 
-# Core Generation Flow
+`imsi` and `iccid` are sequenced as fixed-width digit strings rather than
+integers, which preserves their structure:
 
-At application level, the main generation flow is:
+- **Leading zeros are retained.** A test-network IMSI of `001010000000001`
+  remains 15 digits across the batch.
+- **The IMSI operator prefix is protected.** An IMSI is MCC (3 digits) + MNC
+  (2–3) + MSIN, so only the trailing digits are incremented. A batch that would
+  carry into the first five digits is rejected rather than silently reassigning
+  cards to a different operator.
+- **ICCID width is enforced.** A batch that would extend the ICCID beyond its
+  configured length is rejected.
+
+> [!NOTE]
+> The five-digit protected prefix is a conservative bound valid under every
+> numbering plan. Where the MNC is three digits, its final digit falls inside
+> the incremented range and is not covered; keep such batches clear of the MSIN
+> boundary.
+
+## Issuance ledger
+
+Re-running a configuration yields the **same** identifiers but **new** keys.
+Two cards would then share an ICCID while holding different Ki values, and
+neither could be provisioned reliably.
+
+`write_outputs` records every issued range in `.issuance_ledger.json` within
+`OUTPUT_FILES_DIR` and refuses any batch overlapping one already issued:
+
+```
+IssuanceOverlapError: ICCID range 8991…000-8991…009 overlaps batch 1
+(8991…000-8991…009, issued 2026-08-08T09:14:22+00:00). Re-issuing would
+produce duplicate ICCIDs with different Ki values.
+```
+
+Advance the starting identifiers to continue, or pass `check_issuance=False` to
+override deliberately. A batch counts as issued when it is written, so
+in-memory generation never consumes a range.
+
+## Security considerations
+
+This library produces live cryptographic key material. Treat its output as
+secret.
+
+- **Key generation** uses Python's `secrets` module, backed by the operating
+  system CSPRNG. It is deliberately **not** seedable; a seeded generator may be
+  injected via `DataGenerationScript(config, data_generator=…)` for reproducible
+  test fixtures, and must never be used for cards intended for a real network.
+- **Ki need not leave the process in the clear.** The `EKI` column carries Ki
+  encrypted under the transport key `K4`; prefer it over `KI` in any output that
+  leaves your control.
+- **Output files are written unencrypted** with default permissions. Place
+  `OUTPUT_FILES_DIR` on protected storage and handle transfer out of band.
+- **Configuration contains `op` and `K4`.** Do not commit a populated
+  `settings.json`; the repository tracks only `settings.example.json`.
+
+## Public API
 
 ```python
-from gsm_data_generator import DataGenerationScript, json_loader
-
-config = json_loader("settings.json")
-
-script = DataGenerationScript(config)
-script.json_to_global_params()
-
-result_dfs, keys = script.generate_all_data()
-
-written = script.write_outputs(result_dfs)
+from pysim_perso import (
+    DataGenerationScript,       # end-to-end pipeline
+    json_loader,                # load and validate configuration from a path
+    json_loader_2_ConfigHolder, # ... from a dict or JSON string
+    ConfigHolder,               # validated configuration
+    OutputWriter,               # write frames to delimited files
+    IssuanceLedger,             # issued-range tracking
+    DataGenerator,              # random Ki, OTA keys, PIN/PUK
+    DependentDataGenerator,     # OPc, eKI, ACC
+    CryptoUtils,                # AES-CBC and XOR primitives
+    EncodingUtils,              # GSM EF encode/decode
+    DataTransform,              # hex, byte and nibble conversion
+    DataProcessing,             # configuration and range parsing
+    DataFrameProcessor,         # column construction and encoding
+    Parameters, DataFrames,     # per-run state
+    DATAGENError,               # base exception
+    install_excepthook,         # opt-in diagnostic exception hook
+)
 ```
 
-The GUI and CLI build their respective workflows around this core API.
+Importing the library has no global side effects. `install_excepthook()` opts
+into suppressed backtraces for `DiagnosticError` (unless `DATAGEN_BACKTRACE=1`)
+and termination of multiprocessing children on an unhandled exception.
 
----
-
-# Security Considerations
-
-This project handles security-sensitive SIM personalization information.
-
-Follow these practices:
-
-1. Never commit a populated `settings.json`.
-2. Never expose real `KI`, `K4`, `OP`, `OPC`, OTA keys, PINs, or PUKs in screenshots, issues, logs, or public repositories.
-3. Keep generated Excel/TXT files on protected storage.
-4. Restrict access to issuance ledgers and generated personalization data.
-5. Use test values for demonstrations and development.
-6. Do not reuse issued ICCID/IMSI ranges.
-7. Treat generated files as confidential even when used only for testing.
-
-The repository `.gitignore` excludes `settings.json` and generated output paths to reduce the risk of accidental commits.
-
----
-
-# Packaging
-
-The project uses `setuptools`.
-
-Build-system configuration is defined in `pyproject.toml`, with `setuptools` as the backend.
-
-To build distributable packages:
-
-```bash
-python -m pip install build
-python -m build
-```
-
-The package is published/configured under the Python package name:
-
-```text
-gsm-data-generator
-```
-
-and requires Python `>=3.10`.
-
----
-
-# Development
-
-Install in editable mode:
+## Development
 
 ```bash
 pip install -e .
+pip install pytest pytest-cov black mypy pandas-stubs
+
+pytest --maxfail=1 --disable-warnings -v          # full suite
+pytest tests/python/algorithm/test_encrypt.py -v  # one module
+pytest --cov=pysim_perso --cov-report=term-missing
+
+black pysim_perso/ tests/python/ verify.py setup.py
+mypy pysim_perso/
 ```
 
-Useful development checks include:
+`pandas-stubs` is required: `mypy.ini` sets `ignore_missing_imports = False`,
+so unstubbed `pandas` is an error rather than a warning.
 
-```bash
-python verify.py
-```
+[CI](.github/workflows/ci.yml) runs black, mypy, the suite across Python
+3.10–3.13 on Linux plus 3.11 on Windows and macOS, and a packaging job that
+installs the built wheel into a clean environment and smoke-tests it. It also
+runs weekly: dependencies are unpinned, so the scheduled run surfaces upstream
+breakage without waiting for a change.
 
-If the repository includes its test suite, additional checks may be run with tools such as `pytest`, `black`, and `mypy`.
+## Releasing
 
----
+Versioning and the tag-driven release pipeline are described in
+[RELEASING.md](RELEASING.md). Per-version changes are in
+[CHANGELOG.md](CHANGELOG.md).
 
-# Troubleshooting
+## Contributing
 
-### `ModuleNotFoundError: No module named 'gsm_data_generator'`
+Issues and pull requests are welcome. Before opening a pull request, please
+ensure `black`, `mypy` and the test suite pass locally — CI enforces all three.
 
-Install the project from the repository root:
+New source files should carry the Apache-2.0 header used throughout the tree.
 
-```bash
-pip install -e .
-```
+## License
 
-### `settings.json` not found
-
-Create it from the example configuration:
-
-```bash
-copy settings.example.json settings.json
-```
-
-or on Linux/macOS:
-
-```bash
-cp settings.example.json settings.json
-```
-
-### Batch overlaps an already issued range
-
-Use the next available ICCID/IMSI suggested by the application. Check the issuance ledger before manually changing ranges.
-
-### Excel file will not open from the GUI
-
-Confirm the generated `.xlsx` file still exists in the configured output directory.
-
-### GUI does not open
-
-Confirm that:
-
-- Python 3.10+ is installed
-- Tkinter is available
-- project dependencies are installed
-- `settings.json` is valid
-- the command is being run from the repository root
-
----
-
-# License
-
-Licensed under the **Apache License 2.0**.
-
-See [`LICENSE`](LICENSE) for details.
-
----
-
-## Disclaimer
-
-This software is intended for development, testing, research, lab, and authorized SIM-personalization workflows. Operators are responsible for protecting subscriber identifiers, authentication secrets, and generated provisioning material and for complying with applicable telecommunications, privacy, security, and organizational requirements.
+Licensed under the [Apache License 2.0](LICENSE).
