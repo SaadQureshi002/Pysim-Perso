@@ -1,14 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/corelabs-aperture-bone.svg">
-    <img src="docs/corelabs-aperture-ink.svg" alt="corelabs-oss" width="96">
-  </picture>
+  <img src="assets/logo.png" alt="pysim-perso Logo" width="100">
 </p>
 
 <h1 align="center">pysim-perso</h1>
 
 <p align="center">
-  <a href="https://github.com/corelabs-oss/pysim-perso/actions/workflows/ci.yml"><img src="https://github.com/corelabs-oss/pysim-perso/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/pysim-perso/"><img src="https://img.shields.io/pypi/v/pysim-perso" alt="PyPI"></a>
   <a href="https://pypi.org/project/pysim-perso/"><img src="https://img.shields.io/pypi/pyversions/pysim-perso" alt="Python versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"></a>
@@ -29,22 +25,6 @@ Requires Python 3.10 or newer.
 
 ```bash
 pip install pysim-perso
-```
-
-Runtime dependencies (`pandas`, `pydantic`, `pycryptodome`, `numpy`) are
-resolved automatically.
-
-<details>
-<summary>Installing from source</summary>
-
-```bash
-git clone https://github.com/corelabs-oss/pysim-perso.git
-cd pysim-perso
-pip install -e .
-```
-
-</details>
-
 ## Quick start
 
 Copy the example configuration and set your operator parameters:
